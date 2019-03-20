@@ -35,14 +35,14 @@ trtri_trsm_kernel(rocblas_fill uplo, rocblas_diagonal diag, const T* A, rocblas_
 
     // each hip thread Block compute a inverse of a IB * IB diagonal block of A
 
-    custom_trtri_device<T, IB>(uplo,
-                               diag,
-                               IB,
-                               A + 2 * hipBlockIdx_x * (IB * lda + IB),
-                               lda,
-                               invA + (2 * hipBlockIdx_x / IBD) * (NB * NB) +
-                                   ((2 * hipBlockIdx_x) % IBD) * (IB * NB + IB),
-                               NB);
+    trtri_device<T, IB>(uplo,
+                        diag,
+                        IB,
+                        A + hipBlockIdx_x * (IB * lda + IB),
+                        lda,
+                        invA + (hipBlockIdx_x / IBD) * (NB * NB) +
+                            (hipBlockIdx_x % IBD) * (IB * NB + IB),
+                        NB);
 }
 
 // compute square block of invA
@@ -207,10 +207,10 @@ rocblas_status rocblas_trtri_trsm_template(rocblas_handle handle,
 
     if(blocks > 0)
     {
-        constexpr rocblas_int IBD = 8;
+        constexpr rocblas_int IBD = 4;
         constexpr rocblas_int IB  = NB / IBD;
-        dim3 grid(blocks * IBD / 2);
-        dim3 threads(IB * IB);
+        dim3 grid(blocks * IBD);
+        dim3 threads(IB);
 
         /*
            Algorithm:
@@ -253,21 +253,21 @@ rocblas_status rocblas_trtri_trsm_template(rocblas_handle handle,
                            lda,
                            invA);
 
-        constexpr rocblas_int JB = IB * 4;
+        constexpr rocblas_int JB = IB * 2;
         rocblas_int stride_A     = NB * lda + NB;
         rocblas_int stride_invA  = NB * NB;
         rocblas_int stride_C     = JB * JB;
 
         trtri_strided_gemm_block<T>(
             handle,
-            IB * 2,
-            IB * 2,
-            (const T*)(A + ((uplo == rocblas_fill_lower) ? IB * 2 : IB * 2 * lda)),
+            IB,
+            IB,
+            (const T*)(A + ((uplo == rocblas_fill_lower) ? IB : IB * lda)),
             lda,
             stride_A,
-            (const T*)(invA + ((uplo == rocblas_fill_lower) ? 0 : IB * 2 * NB + IB * 2)),
-            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 2 * NB + IB * 2 : 0)),
-            (T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 2 : IB * 2 * NB)),
+            (const T*)(invA + ((uplo == rocblas_fill_lower) ? 0 : IB * NB + IB)),
+            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * NB + IB : 0)),
+            (T*)(invA + ((uplo == rocblas_fill_lower) ? IB : IB * NB)),
             NB,
             stride_invA,
             (T*)C_tmp,
@@ -277,18 +277,18 @@ rocblas_status rocblas_trtri_trsm_template(rocblas_handle handle,
 
         trtri_strided_gemm_block<T>(
             handle,
-            IB * 2,
-            IB * 2,
-            (const T*)(A + ((uplo == rocblas_fill_lower) ? IB * 4 * lda + IB * 6
-                                                         : IB * 6 * lda + IB * 4)),
+            IB,
+            IB,
+            (const T*)(A + ((uplo == rocblas_fill_lower) ? IB * 2 * lda + IB * 3
+                                                         : IB * 3 * lda + IB * 2)),
             lda,
             stride_A,
-            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 4 * NB + IB * 4
-                                                            : IB * 6 * NB + IB * 6)),
-            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 6 * NB + IB * 6
-                                                            : IB * 4 * NB + IB * 4)),
+            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 2 * NB + IB * 2
+                                                            : IB * 3 * NB + IB * 3)),
+            (const T*)(invA + ((uplo == rocblas_fill_lower) ? IB * 3 * NB + IB * 3
+                                                            : IB * 2 * NB + IB * 2)),
             (T*)(invA +
-                 ((uplo == rocblas_fill_lower) ? IB * 4 * NB + IB * 6 : IB * 6 * NB + IB * 4)),
+                 ((uplo == rocblas_fill_lower) ? IB * 2 * NB + IB * 3 : IB * 3 * NB + IB * 2)),
             NB,
             stride_invA,
             (T*)C_tmp,
