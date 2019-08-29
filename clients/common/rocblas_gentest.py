@@ -195,11 +195,26 @@ def setdefaults(test):
     # Do not put constant defaults here -- use rocblas_common.yaml for that.
     # These are only for dynamic defaults
     # TODO: This should be ideally moved to YAML file, with eval'd expressions.
+    # test.setdefault('strideScale', 1 )
+    if test['function'] == 'ger_strided_batched':
+        print("ger_strided_batched1")
+    if test['function'] == 'gemv_strided_batched':
+        print("gemv_strided_batched1")
     if test['transA'] == '*' or test['transB'] == '*':
         test.setdefault('lda', 0)
         test.setdefault('ldb', 0)
         test.setdefault('ldc', 0)
         test.setdefault('ldd', 0)
+        # if test['batch_count'] > 0:
+        if test['function'] == 'gemv_strided_batched':
+            print("gemv_strided_batched2")
+        if test['function'] == 'ger_strided_batched':
+            print("ger_strided_batched2")
+            test.setdefault('stride_x', (test['M']*abs( test['incx'] ) * test['strideScale']) )
+            test.setdefault('stride_y', (test['N']*abs( test['incy'] ) * test['strideScale']) )
+            print((test['M']*abs( test['incx'] ) * test['strideScale']))
+            print(test['stride_x'] )
+            print(test['strideScale'] )
     else:
         test.setdefault('lda', test['M'] if test['transA'].upper() == 'N' else
                         test['K'])
@@ -207,6 +222,10 @@ def setdefaults(test):
                         test['N'])
         test.setdefault('ldc', test['M'])
         test.setdefault('ldd', test['M'])
+        if test['function'] == 'gemv_strided_batched':
+            print("gemv_strided_batched3")
+        if test['function'] == 'ger_strided_batched':
+            print("ger_strided_batched3")
         if test['batch_count'] > 0:
             test.setdefault('stride_a', test['lda'] *
                             (test['K'] if test['transA'].upper() == 'N' else

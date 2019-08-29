@@ -122,6 +122,8 @@ void testing_ger_strided_batched(const Arguments& arg)
     rocblas_int stride_a    = arg.stride_a;
     rocblas_int batch_count = arg.batch_count;
 
+    std::cout<<"stride_x "<<stride_x<<"stride_y "<<stride_y<<std::endl;
+
     rocblas_local_handle handle;
 
     size_t abs_incx = incx >= 0 ? incx : -incx;
@@ -191,13 +193,13 @@ void testing_ger_strided_batched(const Arguments& arg)
                                                              stride_a,
                                                              batch_count),
                               rocblas_status_success);
-
+        
         return;
     }
 
-    size_A += size_A * (batch_count - 1) + size_t(stride_a - size_A) * (batch_count - 1);
-    size_x += size_x * (batch_count - 1) + size_t(stride_x - size_x) * (batch_count - 1);
-    size_y += size_y * (batch_count - 1) + size_t(stride_y - size_y) * (batch_count - 1);
+    size_A += static_cast<size_t>(stride_a) * static_cast<size_t>(batch_count - 1);
+    size_x += static_cast<size_t>(stride_x) * static_cast<size_t>(batch_count - 1);
+    size_y += static_cast<size_t>(stride_y) * static_cast<size_t>(batch_count - 1);
 
     // Naming: dK is in GPU (device) memory. hK is in CPU (host) memory
     host_vector<T> hA_1(size_A);
