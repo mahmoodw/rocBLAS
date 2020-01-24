@@ -19,11 +19,11 @@ namespace
     constexpr rocblas_int NB_X = 1024;
 
     template <typename T>
-    constexpr T negative_one = -1;
+    const T negative_one = T(-1);
     template <typename T>
-    constexpr T zero = 0;
+    const T zero = T(0);
     template <typename T>
-    constexpr T one = 1;
+    const T one = T(1);
 
     template <typename T, typename U>
     __global__ void flip_vector_kernel(U* __restrict__ data,

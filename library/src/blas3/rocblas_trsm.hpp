@@ -19,11 +19,11 @@ namespace
     using std::min;
 
     template <typename T>
-    const T negative_one = -1;
+    const T negative_one = T(-1);
     template <typename T>
-    const T zero = 0;
+    const T zero = T(0);
     template <typename T>
-    const T one = 1;
+    const T one = T(1);
 
     template <typename T, typename U, typename V>
     __global__ void copy_matrix_trsm(rocblas_int    rows,

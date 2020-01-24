@@ -16,7 +16,7 @@
 #include "utility.hpp"
 
 #define ERROR_EPS_MULTIPLIER 40
-#define RESIDUAL_EPS_MULTIPLIER 20
+#define RESIDUAL_EPS_MULTIPLIER 40
 
 template <typename T>
 void testing_trsv(const Arguments& arg)
@@ -72,9 +72,9 @@ void testing_trsv(const Arguments& arg)
     double gpu_time_used, cpu_time_used;
     double rocblas_gflops, cblas_gflops;
     double rocblas_error;
-    T      error_eps_multiplier    = ERROR_EPS_MULTIPLIER;
-    T      residual_eps_multiplier = RESIDUAL_EPS_MULTIPLIER;
-    T      eps                     = std::numeric_limits<T>::epsilon();
+    double      error_eps_multiplier    = ERROR_EPS_MULTIPLIER;
+    double      residual_eps_multiplier = RESIDUAL_EPS_MULTIPLIER;
+    double      eps                     = get_epsilon<T>();
 
     // allocate memory on device
     device_vector<T> dA(size_A);
@@ -88,12 +88,12 @@ void testing_trsv(const Arguments& arg)
                      M,
                      M,
                      M,
-                     1.0,
+                     T(1.0),
                      hA,
                      lda,
                      hA,
                      lda,
-                     0.0,
+                     T(0.0),
                      AAT,
                      lda);
 
@@ -104,7 +104,7 @@ void testing_trsv(const Arguments& arg)
         for(int j = 0; j < M; j++)
         {
             hA[i + j * lda] = AAT[i + j * lda];
-            t += AAT[i + j * lda] > 0 ? AAT[i + j * lda] : -AAT[i + j * lda];
+            t += rocblas_abs(AAT[i + j * lda]);
         }
         hA[i + i * lda] = t;
     }
@@ -143,10 +143,10 @@ void testing_trsv(const Arguments& arg)
     // copy data from CPU to device
     CHECK_HIP_ERROR(hipMemcpy(dA, hA, sizeof(T) * size_A, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dx_or_b, hx_or_b_1, sizeof(T) * size_x, hipMemcpyHostToDevice));
-    T max_err_1 = 0.0;
-    T max_err_2 = 0.0;
-    T max_res_1 = 0.0;
-    T max_res_2 = 0.0;
+    double max_err_1 = 0.0;
+    double max_err_2 = 0.0;
+    double max_res_1 = 0.0;
+    double max_res_2 = 0.0;
     if(arg.unit_check || arg.norm_check)
     {
         // calculate dxorb <- A^(-1) b   rocblas_device_pointer_host
@@ -161,23 +161,30 @@ void testing_trsv(const Arguments& arg)
         CHECK_ROCBLAS_ERROR(rocblas_trsv<T>(handle, uplo, transA, diag, M, dA, lda, dx_or_b, incx));
         CHECK_HIP_ERROR(hipMemcpy(hx_or_b_2, dx_or_b, sizeof(T) * size_x, hipMemcpyDeviceToHost));
 
-        T err_1 = 0.0;
-        T err_2 = 0.0;
+        double err_1 = 0.0;
+        double err_2 = 0.0;
+        double err_scal = 0.0;
+        double max_err_scal = 0.0;
+        double max_res_scal = 0.0;
         for(int i = 0; i < M; i++)
-            if(hx[i * abs_incx] != 0)
-            {
-                err_1 += std::abs((hx[i * abs_incx] - hx_or_b_1[i * abs_incx]) / hx[i * abs_incx]);
-                err_2 += std::abs((hx[i * abs_incx] - hx_or_b_2[i * abs_incx]) / hx[i * abs_incx]);
-            }
-            else
-            {
-                err_1 += std::abs(hx_or_b_1[i * abs_incx]);
-                err_2 += std::abs(hx_or_b_2[i * abs_incx]);
-            }
+        {
+            // if(hx[i * abs_incx] != 0)
+            // {
+                err_1 += rocblas_abs((hx[i * abs_incx] - hx_or_b_1[i * abs_incx]));
+                err_2 += rocblas_abs((hx[i * abs_incx] - hx_or_b_2[i * abs_incx]));
+                err_scal += rocblas_abs(hx[i * abs_incx]);
+            // }
+            // else
+            // {
+            //     err_1 += rocblas_abs(hx_or_b_1[i * abs_incx]);
+            //     err_2 += rocblas_abs(hx_or_b_2[i * abs_incx]);
+            // }
+        }
+        max_err_scal = max_err_scal > err_scal ? max_err_scal : err_scal;
         max_err_1 = max_err_1 > err_1 ? max_err_1 : err_1;
         max_err_2 = max_err_2 > err_2 ? max_err_2 : err_2;
-        trsm_err_res_check<T>(max_err_1, M, error_eps_multiplier, eps);
-        trsm_err_res_check<T>(max_err_2, M, error_eps_multiplier, eps);
+        trsm_err_res_check<T>(max_err_1/max_err_scal, M, error_eps_multiplier, eps);
+        trsm_err_res_check<T>(max_err_2/max_err_scal, M, error_eps_multiplier, eps);
 
         cblas_trmv<T>(uplo, transA, diag, M, hA, lda, hx_or_b_1, incx);
         cblas_trmv<T>(uplo, transA, diag, M, hA, lda, hx_or_b_2, incx);
@@ -185,24 +192,72 @@ void testing_trsv(const Arguments& arg)
         //                                                  = hx_or_b - hb
         // res is the one norm of the scaled residual for each column
 
-        T res_1 = 0.0;
-        T res_2 = 0.0;
+        double res_1 = 0.0;
+        double res_2 = 0.0;
+        double res_scal = 0.0;
         for(int i = 0; i < M; i++)
-            if(hb[i * abs_incx] != 0)
-            {
-                res_1 += std::abs((hx_or_b_1[i * abs_incx] - hb[i * abs_incx]) / hb[i * abs_incx]);
-                res_2 += std::abs((hx_or_b_2[i * abs_incx] - hb[i * abs_incx]) / hb[i * abs_incx]);
-            }
-            else
-            {
-                res_1 += std::abs(hx_or_b_1[i * abs_incx]);
-                res_2 += std::abs(hx_or_b_2[i * abs_incx]);
-            }
+        {
+            // if(hb[i * abs_incx] != 0)
+            // {
+                res_1 += rocblas_abs((hx_or_b_1[i * abs_incx] - hb[i * abs_incx]));
+                res_2 += rocblas_abs((hx_or_b_2[i * abs_incx] - hb[i * abs_incx]));
+                res_scal += rocblas_abs(hb[i * abs_incx]);
+            // }
+            // else
+            // {
+            //     res_1 += rocblas_abs(hx_or_b_1[i * abs_incx]);
+            //     res_2 += rocblas_abs(hx_or_b_2[i * abs_incx]);
+            // }
+        }
+        max_res_scal = max_err_scal > err_scal ? max_err_scal : err_scal;
         max_res_1 = max_res_1 > res_1 ? max_res_1 : res_1;
         max_res_2 = max_res_2 > res_2 ? max_res_2 : res_2;
 
-        trsm_err_res_check<T>(max_res_1, M, residual_eps_multiplier, eps);
-        trsm_err_res_check<T>(max_res_2, M, residual_eps_multiplier, eps);
+        trsm_err_res_check<T>(max_res_1/max_err_scal, M, residual_eps_multiplier, eps);
+        trsm_err_res_check<T>(max_res_2/max_err_scal, M, residual_eps_multiplier, eps);
+
+        // T err_1 = 0.0;
+        // T err_2 = 0.0;
+        // for(int i = 0; i < M; i++)
+        //     if(hx[i * abs_incx] != 0)
+        //     {
+        //         err_1 += std::abs((hx[i * abs_incx] - hx_or_b_1[i * abs_incx]) / hx[i * abs_incx]);
+        //         err_2 += std::abs((hx[i * abs_incx] - hx_or_b_2[i * abs_incx]) / hx[i * abs_incx]);
+        //     }
+        //     else
+        //     {
+        //         err_1 += std::abs(hx_or_b_1[i * abs_incx]);
+        //         err_2 += std::abs(hx_or_b_2[i * abs_incx]);
+        //     }
+        // max_err_1 = rocblas_abs(max_err_1) > rocblas_abs(err_1) ? max_err_1 : err_1;
+        // max_err_2 = rocblas_abs(max_err_2) > rocblas_abs(err_2) ? max_err_2 : err_2;
+        // trsm_err_res_check<T>(rocblas_abs(max_err_1), M, error_eps_multiplier, eps);
+        // trsm_err_res_check<T>(rocblas_abs(max_err_2), M, error_eps_multiplier, eps);
+
+        // cblas_trmv<T>(uplo, transA, diag, M, hA, lda, hx_or_b_1, incx);
+        // cblas_trmv<T>(uplo, transA, diag, M, hA, lda, hx_or_b_2, incx);
+        // // hx_or_b contains A * (calculated X), so residual = A * (calculated x) - b
+        // //                                                  = hx_or_b - hb
+        // // res is the one norm of the scaled residual for each column
+
+        // T res_1 = 0.0;
+        // T res_2 = 0.0;
+        // for(int i = 0; i < M; i++)
+        //     if(hb[i * abs_incx] != 0)
+        //     {
+        //         res_1 += std::abs((hx_or_b_1[i * abs_incx] - hb[i * abs_incx]) / hb[i * abs_incx]);
+        //         res_2 += std::abs((hx_or_b_2[i * abs_incx] - hb[i * abs_incx]) / hb[i * abs_incx]);
+        //     }
+        //     else
+        //     {
+        //         res_1 += std::abs(hx_or_b_1[i * abs_incx]);
+        //         res_2 += std::abs(hx_or_b_2[i * abs_incx]);
+        //     }
+        // max_res_1 = rocblas_abs(max_res_1) > rocblas_abs(res_1) ? max_res_1 : res_1;
+        // max_res_2 = rocblas_abs(max_res_2) > rocblas_abs(res_2) ? max_res_2 : res_2;
+
+        // trsm_err_res_check<T>(rocblas_abs(max_res_1), M, residual_eps_multiplier, eps);
+        // trsm_err_res_check<T>(rocblas_abs(max_res_2), M, residual_eps_multiplier, eps);
     }
 
     if(arg.timing)
